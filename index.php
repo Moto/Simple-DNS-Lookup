@@ -1,7 +1,30 @@
 <?php
+
 // ini_set('display_errors', 1); // Uncomment to display errors
 // ini_set('display_startup_errors', 1); // Uncomment to display errors
 // error_reporting(E_ALL); // Uncomment to display errors
+
+
+// Function to validate domain
+function isValidDomain($domain) {
+	// Regex pattern to match a valid domain format
+	$domainRegex = '/^(?!:\/\/)(?:[a-zA-Z0-9-]+\.)+(?:[a-zA-Z]{2,})(?:\/)?$/';
+	return preg_match($domainRegex, $domain);
+}
+
+// Function to extract primary domain from a URL
+function extractPrimaryDomain($url) {
+	// Define regex pattern to extract primary domain
+	$pattern = '/(?:[a-z0-9-]+\.)+([a-z]{2,})/i';
+	
+	// Perform regex match
+	if (preg_match($pattern, $url, $matches)) {
+		return $matches[0];
+	} else {
+		return ''; // Return empty string if no match found
+	}
+}
+
 
 function getDNS($domain, $type) {
 	$records = @dns_get_record($domain, $type);
@@ -11,6 +34,20 @@ function getDNS($domain, $type) {
 function fetchIpApiInfo($ip) {
 	$ipapi = @file_get_contents('http://ip-api.com/json/' . $ip . '?fields=countryCode,isp,org,asname');
 	return $ipapi ? json_decode($ipapi, true) : null;
+}
+
+function checkForbiddenDomain($domain, $forbiddenDomains) {
+	foreach ($forbiddenDomains as $forbiddenDomain) {
+		if ($domain === $forbiddenDomain || strpos($domain, '.' . $forbiddenDomain) !== false) {
+			$forbidden_reason = "Sorry, the domain you provided is not allowed.";
+			break;
+		}
+	}
+
+	return [
+		'forbidden' => isset($forbidden_reason),
+		'reason' => isset($forbidden_reason) ? $forbidden_reason : null
+	];
 }
 
 function generateFlagEmoji($countryCode) {
@@ -75,21 +112,34 @@ function generateDNSHtml($records, $type, $addLineBreak=1) {
 	return $html;
 }
 
+$thisDomain = htmlspecialchars($_SERVER["HTTP_HOST"], ENT_QUOTES, "UTF-8");
+
 // If domain is included in URL, prefill form with domain or if form is submitted display domain in it
 $posted_domain = isset($_POST["domain"]) ? $_POST["domain"] : (isset($_GET["domain"]) ? $_GET["domain"] : '');
 
-// Parse url to extract host
+// Parse URL to extract host
 $parsed_url = @parse_url($posted_domain);
-$domain = array_key_exists("host", $parsed_url) ? $parsed_url["host"] : $posted_domain;
+$domain = isset($parsed_url["host"]) ? $parsed_url["host"] : $posted_domain;
+//$domain = array_key_exists("host", $parsed_url) ? $parsed_url["host"] : $posted_domain;
 
-$thisDomain = htmlspecialchars($_SERVER["HTTP_HOST"], ENT_QUOTES, "UTF-8");
+// If domain still not found, handle it as needed
+if ($domain) {
+	$validDomain = isValidDomain($domain);
+	$primaryDomain = extractPrimaryDomain($posted_domain);
+	$validPrimary = isValidDomain($primaryDomain);
+}
 
 // Page URL : check if "?domain=" is in the URL to adapt http_referer content
 $page_url_domain = strpos($_SERVER["REQUEST_URI"], "?domain=") !== false ? $_SERVER['HTTP_X_FORWARDED_PROTO'] . "://" . $thisDomain . $_SERVER["REQUEST_URI"] : $_SERVER['HTTP_X_FORWARDED_PROTO'] . "://" . $thisDomain . $_SERVER["REQUEST_URI"] . "?domain=" . $posted_domain;
 
-$formSubmitted = isset($_POST['submit']);
+$forbiddenDomains = [$_SERVER['HTTP_HOST'],];
+$forbidden_domain = checkForbiddenDomain($domain, $forbiddenDomains);
+
+// Force $formSubmitted to be false if the domain is forbidden
+$formSubmitted = isset($_POST['submit']) && !$forbidden_domain['forbidden'];
 
 //
+
 // Get DNS records and TTLs
 $dnsTypes = ["A" => DNS_A, "AAAA" => DNS_AAAA, "CNAME" => DNS_CNAME, "MX" => DNS_MX, "NS" => DNS_NS, "SOA" => DNS_SOA, "TXT" => DNS_TXT, "ANY" => DNS_ANY, "CAA" => DNS_CAA,
 //These have not been tested, issues may occur but nothing should go wrong!
@@ -147,6 +197,13 @@ $dns_a6_html = generateDNSHtml($dnsRecords['A6'], DNS_A6);
 		<link href="assets/css/bootstrap.min.css" rel="stylesheet">
 		<!-- Bootstrap core CSS -->
 		<link href="assets/css/style.css" rel="stylesheet">
+		<style>
+	.center-container {
+	  display: flex;
+	  justify-content: center;
+	  align-items: center;
+	}
+		</style>
 		<!-- Custom styles for this template -->
 		<script>
 			function updateAction() {
@@ -226,7 +283,7 @@ $dns_a6_html = generateDNSHtml($dnsRecords['A6'], DNS_A6);
 						<!-- ELSE AAAA RECORD -->
 						<td class="vert-align text-center"> <?php echo $dnsRecords['AAAA'][0]["ttl"]?> </td>
 						<td class="success"> <?php echo $dns_aaaa_html;
-                            ?> </td> <?php } ?>
+							?> </td> <?php } ?>
 						<!-- ENDIF AAAA NO RECORD -->
 					</tr>
 					<!-- AAAA RECORD -->
@@ -246,7 +303,7 @@ $dns_a6_html = generateDNSHtml($dnsRecords['A6'], DNS_A6);
 						<!-- ELSE NS RECORD -->
 						<td class="vert-align text-center"> <?php echo $dnsRecords['NS'][0]["ttl"]?> </td>
 						<td class="success"> <?php echo $dns_ns_html;
-                            ?> </td> <?php } ?>
+							?> </td> <?php } ?>
 						<!-- ENDIF NS RECORD -->
 					</tr>
 					<!-- NS RECORD -->
@@ -266,7 +323,7 @@ $dns_a6_html = generateDNSHtml($dnsRecords['A6'], DNS_A6);
 						<!-- ELSE MX RECORD -->
 						<td class="vert-align text-center"> <?php echo $dnsRecords['MX'][0]["ttl"]?> </td>
 						<td class="success"> <?php echo $dns_mx_html;
-                            ?> </td> <?php } ?>
+							?> </td> <?php } ?>
 						<!-- ENDIF MX RECORD -->
 					</tr>
 					<!-- MX RECORD -->
@@ -288,7 +345,7 @@ $dns_a6_html = generateDNSHtml($dnsRecords['A6'], DNS_A6);
 						<td class="success"> <?php 
 							
 							echo $dns_cname_html;
-                            ?> </td> <?php } ?>
+							?> </td> <?php } ?>
 						<!-- ENDIF CNAME RECORD -->
 					</tr>
 					<!-- CNAME RECORD -->
@@ -327,7 +384,7 @@ $dns_a6_html = generateDNSHtml($dnsRecords['A6'], DNS_A6);
 						<!-- ELSE TXT RECORD -->
 						<td class="vert-align text-center"> <?php echo($dnsRecords['TXT'][0]['ttl']); ?> </td>
 						<td class="success"> <?php echo $dns_txt_html;
-                            ?> </td> <?php } ?>
+							?> </td> <?php } ?>
 						<!-- ENDIF TXT RECORD -->
 					</tr>
 					<!-- TXT RECORD -->
@@ -466,7 +523,18 @@ $dns_a6_html = generateDNSHtml($dnsRecords['A6'], DNS_A6);
 					<!-- A6 RECORD -->
 					
 				</table>
-			</div> <?php } ?>
+			</div> <?php } elseif($forbidden_domain['forbidden']){?>
+				<div class="center-container">
+<div style="max-width: 500px;">
+<div class="alert alert-danger" role="alert">
+  <h4 class="alert-heading">Access Denied!</h4>
+  <p><?php echo $forbidden_domain['reason']; ?> Please try again with a different domain.</p>
+  <hr>
+  <p class="mb-0">If you believe this is an error, please contact support.</p>
+</div>
+</div>
+				</div>
+			<?php } ?>
 			<!-- ENDIF FORM SUBMITTED -->
 			<footer class="footer">
 				<p class="text-center">&copy; Simple DNS Lookup - <a href="https://github.com/dehlirious/Simple-DNS-Lookup">Sourcecode on GitHub</a>
